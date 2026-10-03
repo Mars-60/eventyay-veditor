@@ -1328,8 +1328,6 @@ def test_webhook_view_post_bounds_pending_enqueues_celery_task(rf, webhook_secre
         )
 
 
-
-
 def test_webhook_view_talk_published_relative_url_resolves_with_event_base_url(rf, webhook_secret):
     payload = {
         "event": "talk.published",
@@ -1358,10 +1356,14 @@ def test_webhook_view_talk_published_relative_url_resolves_with_event_base_url(r
 
     with (
         patch("veditor.webhooks.settings") as mock_settings,
+        patch("veditor.client.settings") as mock_client_settings,
         patch("eventyay.base.models.Event.objects.filter") as mock_event_filter,
         patch("veditor.webhooks.process_talk_published") as mock_task,
     ):
         mock_settings.VEDITOR_WEBHOOK_SECRET = webhook_secret
+        mock_client_settings.configured = True
+        mock_client_settings.VEDITOR_API_BASE_URL = None
+        mock_client_settings.VEDITOR_BASE_URL = None
         mock_event_filter.return_value.first.return_value = mock_event
 
         view = WebhookView.as_view()
@@ -1399,6 +1401,7 @@ def test_webhook_view_talk_published_relative_url_resolves_with_global_base_url(
 
     with (
         patch("veditor.webhooks.settings") as mock_settings,
+        patch("veditor.client.settings") as mock_client_settings,
         patch("veditor.webhooks.process_talk_published") as mock_task,
     ):
         mock_settings.configured = True
@@ -1407,6 +1410,9 @@ def test_webhook_view_talk_published_relative_url_resolves_with_global_base_url(
         mock_settings.VEDITOR_BASE_URL = None
         mock_settings.VEDITOR_REQUEST_TIMEOUT = 10.0
         mock_settings.VEDITOR_ALLOWED_ORIGINS = None
+        mock_client_settings.configured = True
+        mock_client_settings.VEDITOR_API_BASE_URL = "https://default.example.com"
+        mock_client_settings.VEDITOR_BASE_URL = None
 
         view = WebhookView.as_view()
         response = view(request)
@@ -1441,11 +1447,18 @@ def test_webhook_view_talk_published_relative_url_without_base_url_fails(rf, web
         HTTP_X_VEDITOR_SIGNATURE=sig,
     )
 
-    with patch("veditor.webhooks.settings") as mock_settings, patch.dict("os.environ", {}, clear=True):
+    with (
+        patch("veditor.webhooks.settings") as mock_settings,
+        patch("veditor.client.settings") as mock_client_settings,
+        patch.dict("os.environ", {}, clear=True),
+    ):
         mock_settings.configured = True
         mock_settings.VEDITOR_WEBHOOK_SECRET = webhook_secret
         mock_settings.VEDITOR_API_BASE_URL = None
         mock_settings.VEDITOR_BASE_URL = None
+        mock_client_settings.configured = True
+        mock_client_settings.VEDITOR_API_BASE_URL = None
+        mock_client_settings.VEDITOR_BASE_URL = None
 
         view = WebhookView.as_view()
         response = view(request)
@@ -1479,11 +1492,17 @@ def test_tasks_process_talk_published_relative_url_resolved_in_task():
     mock_event.submissions.filter.return_value.first.return_value = mock_sub
 
     with (
+        patch("django.db.transaction.atomic"),
+        patch("veditor.client.settings") as mock_client_settings,
+        patch.dict("os.environ", {}, clear=True),
         patch("eventyay.base.models.Event.objects.filter") as mock_event_filter,
         patch("eventyay.base.models.Resource.objects.filter") as mock_res_filter,
         patch("eventyay.base.models.Resource.objects.create", side_effect=mock_create),
         patch("eventyay.base.models.Submission.objects.select_for_update"),
     ):
+        mock_client_settings.configured = True
+        mock_client_settings.VEDITOR_API_BASE_URL = None
+        mock_client_settings.VEDITOR_BASE_URL = None
         mock_event_filter.return_value.first.return_value = mock_event
         mock_res_filter.return_value.order_by.return_value.first.return_value = None
 
