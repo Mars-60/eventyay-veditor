@@ -80,7 +80,7 @@ def verify_hmac_signature(
         elif "sha256" in parts:
             received_sig = parts["sha256"]
 
-    if header_ts is not None and not parts.get("v1"):
+    if "t" in parts and not parts.get("v1"):
         return False
 
     # If header had a timestamp and caller didn't supply one, use header timestamp
