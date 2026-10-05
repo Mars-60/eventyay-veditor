@@ -213,7 +213,12 @@ class WebhookView(View):
 
                         resolved_base = VEditorClient.resolve_base_url(event=event_obj)
                     except Exception as exc:  # noqa: BLE001
-                        logger.debug("Failed resolving client base URL for event %s: %s", event_id, exc)
+                        logger.warning(
+                            "Failed resolving client base URL for talk.published: event_id=%s, error=%s",
+                            event_id,
+                            exc,
+                            exc_info=True,
+                        )
 
                     if not resolved_base and getattr(settings, "configured", False):
                         resolved_base = getattr(settings, "VEDITOR_API_BASE_URL", None) or getattr(settings, "VEDITOR_BASE_URL", None)
@@ -228,13 +233,24 @@ class WebhookView(View):
                             client = VEditorClient(event=event_obj)
                             resolved_base = client.base_url
                         except Exception as exc:  # noqa: BLE001
-                            logger.debug("Failed resolving client instance base URL for event %s: %s", event_id, exc)
+                            logger.warning(
+                                "Failed resolving client instance base URL for event_id=%s in webhook: %s",
+                                event_id,
+                                exc,
+                                exc_info=True,
+                            )
 
                     if resolved_base and str(resolved_base).strip():
                         video_url = urljoin(str(resolved_base).strip().rstrip("/") + "/", video_url.lstrip("/"))
                         parsed_video = urlparse(video_url)
 
                 if parsed_video.scheme not in ("http", "https") or not parsed_video.netloc:
+                    logger.warning(
+                        "Rejected talk.published webhook due to invalid or unresolvable video_url: event_id=%s, talk_id=%s, video_url=%r",
+                        event_id,
+                        talk_id,
+                        video_url,
+                    )
                     return JsonResponse({"error": "video_url must be a valid HTTP or HTTPS URL with host"}, status=400)
 
             if external_id is None or not str(external_id).strip():

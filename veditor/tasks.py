@@ -418,8 +418,13 @@ def process_talk_published(
                     resolved_base = None
                     try:
                         resolved_base = VEditorClient.resolve_base_url(event=event_obj)
-                    except Exception:  # noqa: S110
-                        pass
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "Failed resolving base URL via VEditorClient for event_id=%s: %s",
+                            event_id,
+                            exc,
+                            exc_info=True,
+                        )
                     if not resolved_base and event_obj is not None and hasattr(event_obj, "settings"):
                         resolved_base = event_obj.settings.get("veditor_api_base_url") or event_obj.settings.get("veditor_base_url")
                     if not resolved_base and getattr(settings, "configured", False):
@@ -431,7 +436,12 @@ def process_talk_published(
                         parsed_video = urlparse(video_url)
 
             if parsed_video.scheme not in ("http", "https") or not parsed_video.netloc:
-                logger.warning("Empty or invalid video_url received for talk.published: %r", video_url)
+                logger.warning(
+                    "Rejected talk.published in task due to unresolvable video_url: event_id=%s, talk_id=%s, video_url=%r",
+                    event_id,
+                    talk_id,
+                    video_url,
+                )
                 return {
                     "status": "error",
                     "message": "Missing or invalid video_url scheme/host",
@@ -583,7 +593,12 @@ def process_talk_published(
         )
         raise
     except Exception as exc:  # noqa: BLE001
-        logger.error("Failed processing talk.published for talk_id=%s: %s", talk_id, exc)
+        logger.exception(
+            "Failed processing talk.published for talk_id=%s, event_id=%s: %s",
+            talk_id,
+            event_id,
+            exc,
+        )
         return {
             "status": "error",
             "message": str(exc),

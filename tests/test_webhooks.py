@@ -1360,7 +1360,10 @@ def test_webhook_view_talk_published_relative_url_resolves_with_event_base_url(r
         patch("eventyay.base.models.Event.objects.filter") as mock_event_filter,
         patch("veditor.webhooks.process_talk_published") as mock_task,
     ):
+        mock_settings.DEBUG = False
+        mock_settings.configured = True
         mock_settings.VEDITOR_WEBHOOK_SECRET = webhook_secret
+        mock_client_settings.DEBUG = False
         mock_client_settings.configured = True
         mock_client_settings.VEDITOR_API_BASE_URL = None
         mock_client_settings.VEDITOR_BASE_URL = None
@@ -1369,8 +1372,8 @@ def test_webhook_view_talk_published_relative_url_resolves_with_event_base_url(r
         view = WebhookView.as_view()
         response = view(request)
 
-        assert response.status_code == 200, response.content.decode("utf-8")
-        assert mock_task.delay.called
+        assert response.status_code == 200, f"Expected 200 but got {response.status_code}: {response.content.decode('utf-8', errors='replace')}"
+        assert mock_task.delay.called, "process_talk_published task was not enqueued"
         mock_task.delay.assert_called_once_with(
             event_id=10,
             talk_id=42,
@@ -1404,12 +1407,14 @@ def test_webhook_view_talk_published_relative_url_resolves_with_global_base_url(
         patch("veditor.client.settings") as mock_client_settings,
         patch("veditor.webhooks.process_talk_published") as mock_task,
     ):
+        mock_settings.DEBUG = False
         mock_settings.configured = True
         mock_settings.VEDITOR_WEBHOOK_SECRET = webhook_secret
         mock_settings.VEDITOR_API_BASE_URL = "https://default.example.com"
         mock_settings.VEDITOR_BASE_URL = None
         mock_settings.VEDITOR_REQUEST_TIMEOUT = 10.0
         mock_settings.VEDITOR_ALLOWED_ORIGINS = None
+        mock_client_settings.DEBUG = False
         mock_client_settings.configured = True
         mock_client_settings.VEDITOR_API_BASE_URL = "https://default.example.com"
         mock_client_settings.VEDITOR_BASE_URL = None
@@ -1417,8 +1422,8 @@ def test_webhook_view_talk_published_relative_url_resolves_with_global_base_url(
         view = WebhookView.as_view()
         response = view(request)
 
-        assert response.status_code == 200
-        assert mock_task.delay.called
+        assert response.status_code == 200, f"Expected 200 but got {response.status_code}: {response.content.decode('utf-8', errors='replace')}"
+        assert mock_task.delay.called, "process_talk_published task was not enqueued"
         mock_task.delay.assert_called_once_with(
             event_id=10,
             talk_id=42,
@@ -1452,10 +1457,12 @@ def test_webhook_view_talk_published_relative_url_without_base_url_fails(rf, web
         patch("veditor.client.settings") as mock_client_settings,
         patch.dict("os.environ", {}, clear=True),
     ):
+        mock_settings.DEBUG = False
         mock_settings.configured = True
         mock_settings.VEDITOR_WEBHOOK_SECRET = webhook_secret
         mock_settings.VEDITOR_API_BASE_URL = None
         mock_settings.VEDITOR_BASE_URL = None
+        mock_client_settings.DEBUG = False
         mock_client_settings.configured = True
         mock_client_settings.VEDITOR_API_BASE_URL = None
         mock_client_settings.VEDITOR_BASE_URL = None
@@ -1463,9 +1470,9 @@ def test_webhook_view_talk_published_relative_url_without_base_url_fails(rf, web
         view = WebhookView.as_view()
         response = view(request)
 
-        assert response.status_code == 400
+        assert response.status_code == 400, f"Expected 400 but got {response.status_code}: {response.content.decode('utf-8', errors='replace')}"
         data = json.loads(response.content.decode("utf-8"))
-        assert "video_url must be a valid HTTP or HTTPS URL" in data["error"]
+        assert "video_url must be a valid HTTP or HTTPS URL" in data.get("error", ""), f"Unexpected error message in payload: {data}"
 
 
 def test_tasks_process_talk_published_relative_url_resolved_in_task():
@@ -1500,6 +1507,7 @@ def test_tasks_process_talk_published_relative_url_resolved_in_task():
         patch("eventyay.base.models.Resource.objects.create", side_effect=mock_create),
         patch("eventyay.base.models.Submission.objects.select_for_update"),
     ):
+        mock_client_settings.DEBUG = False
         mock_client_settings.configured = True
         mock_client_settings.VEDITOR_API_BASE_URL = None
         mock_client_settings.VEDITOR_BASE_URL = None
@@ -1513,7 +1521,39 @@ def test_tasks_process_talk_published_relative_url_resolved_in_task():
             video_url="/studio/media/42/final/master.mp4",
         )
 
-        assert result["status"] == "success"
-        assert result["video_url"] == "https://veditor.eventyay.com/studio/media/42/final/master.mp4"
-        assert len(created_resource) == 1
-        assert created_resource[0].link == "https://veditor.eventyay.com/studio/media/42/final/master.mp4"
+        assert result.get("status") == "success", f"Expected task success, got {result.get('status')}: {result.get('message', result)}"
+        assert result.get("video_url") == "https://veditor.eventyay.com/studio/media/42/final/master.mp4", (
+            f"Unexpected resolved video_url: {result.get('video_url')}"
+        )
+        assert len(created_resource) == 1, f"Expected exactly 1 resource created, got {len(created_resource)}: {created_resource}"
+        assert created_resource[0].link == "https://veditor.eventyay.com/studio/media/42/final/master.mp4", (
+            f"Unexpected resource link: {created_resource[0].link}"
+        )
+
+
+def test_tasks_process_talk_published_relative_url_without_base_fails_gracefully():
+    mock_event = MagicMock()
+    mock_event.id = 1
+    mock_event.slug = "test-event"
+    mock_event.settings = {}
+
+    with (
+        patch("veditor.client.settings") as mock_client_settings,
+        patch.dict("os.environ", {}, clear=True),
+        patch("eventyay.base.models.Event.objects.filter") as mock_event_filter,
+    ):
+        mock_client_settings.DEBUG = False
+        mock_client_settings.configured = True
+        mock_client_settings.VEDITOR_API_BASE_URL = None
+        mock_client_settings.VEDITOR_BASE_URL = None
+        mock_event_filter.return_value.first.return_value = mock_event
+
+        result = process_talk_published(
+            event_id=1,
+            talk_id=42,
+            external_id="REL123",
+            video_url="/studio/media/42/final/master.mp4",
+        )
+
+        assert result.get("status") == "error", f"Expected error status, got {result.get('status')}: {result}"
+        assert "Missing or invalid video_url scheme/host" in result.get("message", ""), f"Unexpected error message: {result}"
