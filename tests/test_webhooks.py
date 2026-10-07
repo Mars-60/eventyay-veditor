@@ -163,6 +163,32 @@ def test_webhook_view_post_success(rf, webhook_secret):
         )
 
 
+@pytest.mark.parametrize("ts_part", ["", "t=invalid,", "t=,"])
+def test_webhook_view_v1_without_valid_timestamp_rejected(rf, webhook_secret, ts_part):
+    payload = {
+        "talk_id": 101,
+        "event_id": 42,
+        "timestamp": int(time.time()),
+    }
+    body = json.dumps(payload).encode("utf-8")
+    sig = generate_signature(webhook_secret, body, prefix="v1=")
+    header = f"{ts_part}{sig}"
+
+    request = rf.post(
+        reverse("plugins:veditor:webhook"),
+        data=body,
+        content_type="application/json",
+        HTTP_X_VEDITOR_SIGNATURE=header,
+    )
+
+    with patch("veditor.webhooks.settings") as mock_settings:
+        mock_settings.VEDITOR_WEBHOOK_SECRET = webhook_secret
+        response = WebhookView.as_view()(request)
+
+    assert response.status_code == 401
+    assert "Invalid webhook signature" in json.loads(response.content)["error"]
+
+
 def test_webhook_view_missing_signature_header(rf, webhook_secret):
     payload = {"talk_id": 101, "event_id": 42, "timestamp": time.time()}
     body = json.dumps(payload).encode("utf-8")

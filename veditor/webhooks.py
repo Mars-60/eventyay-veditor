@@ -83,6 +83,9 @@ def verify_hmac_signature(
     if "t" in parts and not parts.get("v1"):
         return False
 
+    if "v1" in parts and header_ts is None:
+        return False
+
     # If header had a timestamp and caller didn't supply one, use header timestamp
     effective_ts = timestamp if timestamp is not None else header_ts
     if effective_ts is not None:
