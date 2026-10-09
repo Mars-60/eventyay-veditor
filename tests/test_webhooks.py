@@ -163,6 +163,32 @@ def test_webhook_view_post_success(rf, webhook_secret):
         )
 
 
+@pytest.mark.parametrize("ts_part", ["", "t=invalid,", "t=,"])
+def test_webhook_view_v1_without_valid_timestamp_rejected(rf, webhook_secret, ts_part):
+    payload = {
+        "talk_id": 101,
+        "event_id": 42,
+        "timestamp": int(time.time()),
+    }
+    body = json.dumps(payload).encode("utf-8")
+    sig = generate_signature(webhook_secret, body, prefix="v1=")
+    header = f"{ts_part}{sig}"
+
+    request = rf.post(
+        reverse("plugins:veditor:webhook"),
+        data=body,
+        content_type="application/json",
+        HTTP_X_VEDITOR_SIGNATURE=header,
+    )
+
+    with patch("veditor.webhooks.settings") as mock_settings:
+        mock_settings.VEDITOR_WEBHOOK_SECRET = webhook_secret
+        response = WebhookView.as_view()(request)
+
+    assert response.status_code == 401
+    assert "Invalid webhook signature" in json.loads(response.content)["error"]
+
+
 def test_webhook_view_missing_signature_header(rf, webhook_secret):
     payload = {"talk_id": 101, "event_id": 42, "timestamp": time.time()}
     body = json.dumps(payload).encode("utf-8")
@@ -629,6 +655,92 @@ def test_webhook_view_prioritizes_header_timestamp_for_replay_skew(rf, webhook_s
         assert response.status_code == 400
         data = json.loads(response.content.decode("utf-8"))
         assert "timestamp expired" in data["error"]
+
+
+def test_webhook_view_mixed_format_rejected(rf, webhook_secret):
+    now_ts = int(time.time())
+    old_payload_ts = now_ts - 500
+    payload = {
+        "talk_id": 101,
+        "event_id": 42,
+        "timestamp": old_payload_ts,
+    }
+    body = json.dumps(payload).encode("utf-8")
+
+    sig = generate_signature(webhook_secret, body, prefix="sha256=")
+    header = f"t={now_ts},{sig}"
+
+    request = rf.post(
+        reverse("plugins:veditor:webhook"),
+        data=body,
+        content_type="application/json",
+        HTTP_X_VEDITOR_SIGNATURE=header,
+    )
+
+    with patch("veditor.webhooks.settings") as mock_settings:
+        mock_settings.VEDITOR_WEBHOOK_SECRET = webhook_secret
+        view = WebhookView.as_view()
+        response = view(request)
+
+        assert response.status_code == 401
+        data = json.loads(response.content.decode("utf-8"))
+        assert "Invalid webhook signature" in data["error"]
+
+
+def test_webhook_view_mixed_format_malformed_t_rejected(rf, webhook_secret):
+    now_ts = int(time.time())
+    payload = {
+        "talk_id": 101,
+        "event_id": 42,
+        "timestamp": now_ts,
+    }
+    body = json.dumps(payload).encode("utf-8")
+    sig = generate_signature(webhook_secret, body, prefix="sha256=")
+    header = f"t=invalid,{sig}"
+
+    request = rf.post(
+        reverse("plugins:veditor:webhook"),
+        data=body,
+        content_type="application/json",
+        HTTP_X_VEDITOR_SIGNATURE=header,
+    )
+
+    with patch("veditor.webhooks.settings") as mock_settings:
+        mock_settings.VEDITOR_WEBHOOK_SECRET = webhook_secret
+        view = WebhookView.as_view()
+        response = view(request)
+
+        assert response.status_code == 401
+        data = json.loads(response.content.decode("utf-8"))
+        assert "Invalid webhook signature" in data["error"]
+
+
+def test_webhook_view_mixed_format_empty_t_rejected(rf, webhook_secret):
+    now_ts = int(time.time())
+    payload = {
+        "talk_id": 101,
+        "event_id": 42,
+        "timestamp": now_ts,
+    }
+    body = json.dumps(payload).encode("utf-8")
+    sig = generate_signature(webhook_secret, body, prefix="sha256=")
+    header = f"t=,{sig}"
+
+    request = rf.post(
+        reverse("plugins:veditor:webhook"),
+        data=body,
+        content_type="application/json",
+        HTTP_X_VEDITOR_SIGNATURE=header,
+    )
+
+    with patch("veditor.webhooks.settings") as mock_settings:
+        mock_settings.VEDITOR_WEBHOOK_SECRET = webhook_secret
+        view = WebhookView.as_view()
+        response = view(request)
+
+        assert response.status_code == 401
+        data = json.loads(response.content.decode("utf-8"))
+        assert "Invalid webhook signature" in data["error"]
 
 
 def test_webhook_view_accepts_integer_zero_talk_and_event_id(rf, webhook_secret):
