@@ -13,6 +13,7 @@ Exercises the complete user journey across:
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.parse
 from datetime import datetime
@@ -525,6 +526,12 @@ def _render_connect_view(integrated_event) -> str:
     return response.content.decode("utf-8")
 
 
+PUBLISHED_BADGE_PATTERN = re.compile(
+    r'<span\s+class="label label-success">\s*<i\s+class="fa fa-check"></i>\s*Published\s*</span>',
+    re.DOTALL,
+)
+
+
 def test_dashboard_shows_published_after_talk_published(integrated_event, integrated_talk):
     """The dashboard must show Published once talk.published stores a recording Resource."""
     result = process_talk_published(
@@ -548,7 +555,7 @@ def test_dashboard_shows_published_after_talk_published(integrated_event, integr
             assert not integrated_talk.submission.recording_url
 
     content = _render_connect_view(integrated_event)
-    assert "Published" in content
+    assert PUBLISHED_BADGE_PATTERN.search(content)
     assert "Waiting for Recording" not in content
 
 
@@ -579,7 +586,7 @@ def test_dashboard_and_provider_handle_duplicate_resources_first_empty(integrate
 
     # 1. Dashboard shows Published and not Waiting for Recording
     content = _render_connect_view(integrated_event)
-    assert "Published" in content
+    assert PUBLISHED_BADGE_PATTERN.search(content)
     assert "Waiting for Recording" not in content
 
     # 2. Recording provider retrieves the second resource and returns a valid player
@@ -611,7 +618,7 @@ def test_dashboard_and_provider_when_all_resources_have_empty_link(integrated_ev
     # 1. Dashboard shows Waiting for Recording and not Published
     content = _render_connect_view(integrated_event)
     assert "Waiting for Recording" in content
-    assert "Published" not in content
+    assert not PUBLISHED_BADGE_PATTERN.search(content)
 
     # 2. Recording provider returns empty dict
     provider = VEditorRecordingProvider(integrated_event)
@@ -633,4 +640,4 @@ def test_dashboard_shows_waiting_for_recording_when_unrecorded(integrated_event,
 
     content = _render_connect_view(integrated_event)
     assert "Waiting for Recording" in content
-    assert "Published" not in content
+    assert not PUBLISHED_BADGE_PATTERN.search(content)

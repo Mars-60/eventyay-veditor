@@ -119,6 +119,7 @@ def test_recording_provider_skips_empty_resource_and_selects_valid():
     submission.resources.filter.return_value = mock_qs
 
     result = provider.get_recording(submission)
+    mock_qs.exclude.assert_called_with(link="")
     assert "iframe" in result
     assert "<video controls" in result["iframe"]
     assert 'src="https://cdn.example.com/videos/talk.mp4"' in result["iframe"]
