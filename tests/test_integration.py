@@ -32,6 +32,7 @@ from eventyay.base.models import Event, Organizer, Resource, Room, Schedule, Sub
 
 from tests.mock_veditor import validate_jwt_structure
 from veditor.recording import VEditorRecordingProvider
+from veditor.tasks import process_talk_published
 from veditor.views import ConnectView
 from veditor.webhooks import WebhookView
 
@@ -487,3 +488,52 @@ def test_mock_veditor_bulk_talks_endpoint(mock_veditor):
     assert mock_veditor.synced_talks[0]["external_id"] == "TALK_BULK_1"
     assert mock_veditor.synced_talks[1]["external_id"] == "TALK_BULK_2"
     assert len(mock_veditor.bulk_sync_requests) == 1
+
+
+# ============================================================================
+# Scenario H: Dashboard reflects published recording status
+# ============================================================================
+
+
+def test_dashboard_shows_published_after_talk_published(integrated_event, integrated_talk):
+    """The dashboard must show Published once talk.published stores a recording Resource."""
+    result = process_talk_published(
+        event_id=integrated_event.id,
+        talk_id=integrated_talk.slot.id,
+        external_id=integrated_talk.submission.code,
+        video_url="https://cdn.example.org/videos/keynote-open-source-ai.mp4",
+    )
+    assert result["status"] == "success"
+
+    with scope(event=integrated_event):
+        resource = Resource.objects.get(submission=integrated_talk.submission, description="Video Recording")
+        assert resource.link == "https://cdn.example.org/videos/keynote-open-source-ai.mp4"
+
+    rf = RequestFactory()
+    request = rf.get(
+        reverse(
+            "plugins:veditor:connect",
+            kwargs={
+                "organizer": integrated_event.organizer.slug,
+                "event": integrated_event.slug,
+            },
+        )
+    )
+    request.user = integrated_event.organizer_user
+    request.event = integrated_event
+    request.organizer = integrated_event.organizer
+    setup_request(request)
+    request.LANGUAGE_CODE = "en"
+    request.META["HTTP_ACCEPT_LANGUAGE"] = "en"
+
+    response = ConnectView.as_view()(
+        request,
+        organizer=integrated_event.organizer.slug,
+        event=integrated_event.slug,
+    )
+
+    assert response.status_code == 200
+    response.render()
+    content = response.content.decode("utf-8")
+    assert "Published" in content
+    assert "Waiting for Recording" not in content
